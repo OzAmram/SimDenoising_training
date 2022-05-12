@@ -6,6 +6,69 @@ import torch.nn as nn
 import torch.nn.functional as f
 from torch.autograd import Variable
 
+
+class DnPointCloudCNN(nn.Module):
+    def __init__(self, channels=1, img_size = 100, num_init_CNN_layers=3, num_post_CNN_layers = 3, kernel_size=3, features=100, set_feature_size = 3, set_latent_size = 50):
+        super(DnPointCloudCNN, self).__init__()
+        self.set_feature_size = set_feature_size
+        self.set_latent_size = set_latent_size
+        self.img_size = img_size
+
+        self.set_feature_extractor = nn.Sequential(
+            nn.Linear(set_feature_size, 50),
+            nn.ELU(inplace=True),
+            nn.Linear(50, set_latent_size),
+            nn.ELU(inplace=True),
+            nn.Linear(set_latent_size, set_latent_size)
+        )
+
+        self.set_regressor = nn.Sequential(
+            nn.Linear(set_latent_size, set_latent_size),
+            nn.ELU(inplace=True),
+            nn.Linear(set_latent_size, set_latent_size),
+            nn.ELU(inplace=True),
+            nn.Linear(set_latent_size, img_size * img_size),
+            nn.ELU(inplace=True)
+        )
+
+        
+        padding = int((kernel_size-1)/2)
+        alpha = 0.2
+        init_cnn_layers = []
+        init_cnn_layers.append(nn.Conv2d(in_channels=channels, out_channels=features, kernel_size=kernel_size, padding=padding, bias=False))
+        init_cnn_layers.append(nn.LeakyReLU(negative_slope=alpha,inplace=True))
+        for _ in range(num_init_CNN_layers-1):
+            init_cnn_layers.append(nn.Conv2d(in_channels=features, out_channels=features, kernel_size=kernel_size, padding=padding, bias=False))
+            init_cnn_layers.append(nn.ReLU(inplace=True))
+
+        self.init_cnn = nn.Sequential(*init_cnn_layers)
+
+
+        post_cnn_layers = []
+        post_cnn_layers.append(nn.Conv2d(in_channels=features+1, out_channels=features, kernel_size=kernel_size, padding=padding, bias=False))
+        post_cnn_layers.append(nn.ReLU(inplace=True))
+        for _ in range(num_post_CNN_layers-2):
+            post_cnn_layers.append(nn.Conv2d(in_channels=features, out_channels=features, kernel_size=kernel_size, padding=padding, bias=False))
+            post_cnn_layers.append(nn.ReLU(inplace=True))
+
+        post_cnn_layers.append(nn.Conv2d(in_channels=features, out_channels=channels, kernel_size=kernel_size, padding=padding, bias=False))
+        self.post_cnn = nn.Sequential(*post_cnn_layers)
+
+
+        
+
+    def forward(self, img, feats):
+        img = self.init_cnn(img)
+        feats = self.set_feature_extractor(feats)
+        feats = feats.sum(dim=1)
+        feats = self.set_regressor(feats)
+        feats = feats.view(-1, 1, self.img_size, self.img_size)
+        img = torch.cat((feats, img), dim = 1)
+        out = self.post_cnn(img)
+
+        return out
+
+
 class DnCNN(nn.Module):
     def __init__(self, channels=1, num_of_layers=9, kernel_size=3, features=100):
         super(DnCNN, self).__init__()
@@ -41,7 +104,6 @@ class PatchLoss(nn.Module):
                     max_patch_loss = max(max_patch_loss, f.l1_loss(output_patches[j][k], target_patches[j][k]))
             avg_loss+=max_patch_loss
         avg_loss/=len(output)
-        #print(avg_loss)
         return avg_loss;
 
 class WeightedPatchLoss(nn.Module):

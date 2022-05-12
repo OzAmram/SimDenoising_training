@@ -9,7 +9,7 @@ from torch.autograd import Variable
 from torch.nn import functional as f
 import os
 import argparse
-from models import DnCNN, PatchLoss, WeightedPatchLoss
+from models import DnCNN, DnPointCloudCNN, PatchLoss, WeightedPatchLoss
 from dataset import *
 import glob
 import torch.optim as optim
@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader
 import math
 from tqdm import tqdm
 import random
+from torchinfo import summary
 
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -27,6 +28,8 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 parser = ArgumentParser(description="DnCNN", config_options=MagiConfigOptions(), formatter_class=ArgumentDefaultsRawHelpFormatter)
 
 parser.add_argument("--num-layers", type=int, default=9, help="Number of total layers in the CNN")
+parser.add_argument("--imageOnly", default = False, action = 'store_true', help = "Use input image only")
+parser.add_argument("--applyAugs", default = True, help = "Apply augmentations (flips and rotations) to images")
 parser.add_argument("--outf", type=str, required=True, help='Name of folder to be used to store outputs')
 parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
 parser.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
@@ -56,7 +59,7 @@ def main():
     random.seed(args.randomseed)
     torch.manual_seed(args.randomseed)
 
-    os.makedirs(args.outf)
+    if(not os.path.exists(args.outf)): os.makedirs(args.outf)
     parser.write_config(args, args.outf + "/config_out.py")
     # choose cpu or gpu
     if torch.cuda.is_available():
@@ -66,12 +69,13 @@ def main():
         args.device = torch.device('cpu')
         print("Using CPU")
 
+    #args.device = torch.device('cpu')
     # Load dataset
     print('Loading dataset ...\n')
 
-    dataset_train = RootDataset(sharp_root=args.trainfileSharp, fuzzy_root=args.trainfileFuzz, transform=args.transform)
+    dataset_train = RootDataset(sharp_root=args.trainfileSharp, fuzzy_root=args.trainfileFuzz, transform=args.transform, applyAugs = args.applyAugs, imageOnly = args.imageOnly)
     loader_train = DataLoader(dataset=dataset_train, batch_size=args.batchSize, num_workers=args.num_workers, shuffle=True)
-    dataset_val = RootDataset(sharp_root=args.valfileSharp, fuzzy_root=args.valfileFuzz, transform=args.transform)
+    dataset_val = RootDataset(sharp_root=args.valfileSharp, fuzzy_root=args.valfileFuzz, transform=args.transform, applyAugs = args.applyAugs, imageOnly = args.imageOnly)
     loader_val = DataLoader(dataset=dataset_val, batch_size=args.batchSize, num_workers=args.num_workers)
 
     xbins = dataset_train.xbins
@@ -82,7 +86,13 @@ def main():
     ymax = dataset_train.ymax
 
     # Build model
-    model = DnCNN(channels=1, num_of_layers=args.num_layers, kernel_size=args.kernelSize, features=args.features).to(device=args.device)
+    if(args.imageOnly):
+        model = DnCNN(channels=1, num_of_layers=args.num_layers, kernel_size=args.kernelSize, features=args.features).to(device=args.device)
+    else:
+        model = DnPointCloudCNN(channels=1, num_init_CNN_layers=args.num_layers//2, num_post_CNN_layers = args.num_layers//2, 
+                kernel_size=args.kernelSize, features=args.features).to(device=args.device)
+        summary(model, [(1,1,100,100), (1,100,3)])
+
     if (args.model == None):
         model.apply(init_weights)
         print("Creating new model ")
@@ -92,7 +102,8 @@ def main():
         model.eval()
 
     # Loss function
-    criterion = PatchLoss()
+    #criterion = PatchLoss()
+    criterion = nn.L1Loss()
     criterion.to(device=args.device)
 
     #Optimizer
@@ -111,9 +122,14 @@ def main():
             model.train()
             model.zero_grad()
             optimizer.zero_grad()
-            sharp, fuzzy = data
-            fuzzy = fuzzy.unsqueeze(1)
-            output = model((fuzzy.float().to(args.device)))
+            if(args.imageOnly):
+                sharp, fuzzy = data
+                fuzzy = fuzzy.unsqueeze(1)
+                output = model((fuzzy.float().to(args.device)))
+            else:
+                (sharp, fuzzy), feats = data
+                fuzzy = fuzzy.unsqueeze(1)
+                output = model((fuzzy.float().to(args.device)), feats.float().to(args.device))
             batch_loss = criterion(output.squeeze(1).to(args.device), sharp.to(args.device)).to(args.device)
             batch_loss.backward()
             optimizer.step()
@@ -123,20 +139,26 @@ def main():
             del fuzzy
             del output
             del batch_loss
+            if(not args.imageOnly): del feats
         train_loss = train_loss/len(loader_train)
         training_losses[epoch] = train_loss
         tqdm.write("loss: "+ str(train_loss))
 
         val_loss = 0
         for i, data in tqdm(enumerate(loader_val, 0), unit="batch", total=len(loader_val)):
-            val_sharp, val_fuzzy = data
-            val_output = model((val_fuzzy.unsqueeze(1).float().to(args.device)))
+            if(args.imageOnly):
+                val_sharp, val_fuzzy = data
+                val_output = model((val_fuzzy.unsqueeze(1).float().to(args.device)))
+            else:
+                (val_sharp, val_fuzzy), val_feats = data
+                val_output = model((val_fuzzy.unsqueeze(1).float().to(args.device)), val_feats.float().to(args.device))
             output_loss = criterion(val_output.squeeze(1).to(args.device), val_sharp.to(args.device)).to(args.device)
             val_loss+=output_loss.item()
             del val_sharp
             del val_fuzzy
             del val_output
             del output_loss
+            if(not args.imageOnly): del val_feats
         val_loss = val_loss/len(loader_val)
         scheduler.step(torch.tensor([val_loss]))
         validation_losses[epoch] = val_loss

@@ -26,10 +26,60 @@ def get_branch(file_paths):
     branch = np.asarray(branch)
     return branch
 
+def get_feature_branches(file_paths, num_to_keep = 100):
+    step_x = None
+    step_y = None
+    step_z = None
+    step_E = None
+    for i, elem in enumerate(file_paths):
+        tree = get_tree(file_paths[i])
+        x = tree["step_x"].array()
+        y = tree["step_y"].array()
+        z = tree["step_z"].array()
+        E = tree["step_E"].array()
+
+        Es = np.zeros((len(E), num_to_keep))
+        xs = np.zeros((len(E), num_to_keep))
+        ys = np.zeros((len(E), num_to_keep))
+        zs = np.zeros((len(E), num_to_keep))
+
+        #arrays are not uniform size, so need to loop through
+        for j in range(len(E)):
+            #normalize E (?)
+
+            #Get indices of largest energy steps
+            E_ = np.array(E[j])
+            top_idxs = np.argpartition(E_, kth = -num_to_keep)[-num_to_keep:]
+            Es[j] = E_[top_idxs]
+            xs[j] = np.array(x[j])[top_idxs]
+            ys[j] = np.array(y[j])[top_idxs]
+            zs[j] = np.array(z[j])[top_idxs]
+
+        if(i == 0):
+            step_x = xs
+            step_y = ys
+            step_z = zs
+            step_E = Es
+        else:
+            step_x = np.concatenate((step_x, xs))
+            step_y = np.concatenate((step_y, ys))
+            step_z = np.concatenate((step_z, zs))
+            step_E = np.concatenate((step_E, Es))
+    step_x = np.asarray(step_x)
+    step_y = np.asarray(step_y)
+    step_z = np.asarray(step_z)
+    step_E = np.asarray(step_E)
+    return (step_x, step_y, step_z, step_E)
+
+
 class RootDataset(udata.Dataset):
     allowed_transforms = ["none","normalize","normalizeSharp","log10","sqrt"]
     nfeatures = 1
-    def __init__(self, fuzzy_root, sharp_root, transform=[], shuffle=True, output=False):
+    def __init__(self, fuzzy_root, sharp_root, transform=[], shuffle=True, output=False, applyAugs = True, imageOnly=True):
+        print(fuzzy_root)
+        print(sharp_root)
+        self.imageOnly = imageOnly
+        self.applyAugs = applyAugs
         # assume bin configuration is the same for all files
         sharp_tree = get_tree(sharp_root[0])
         self.xbins = sharp_tree["xbins"].array().to_numpy()[0]
@@ -69,15 +119,32 @@ class RootDataset(udata.Dataset):
                 self.stdevs = np.std(norm_branch, axis=(1,2,3))[:,None,None,None]
                 self.sharp_branch = np.divide(self.sharp_branch-self.means,self.stdevs,where=self.stdevs!=0)
                 self.fuzzy_branch = np.divide(self.fuzzy_branch-self.means,self.stdevs,where=self.stdevs!=0)
+
+        self.feats = None
+        if(not self.imageOnly):
+            step_x, step_y, step_z, step_E = get_feature_branches(fuzzy_root, num_to_keep = 100)
+            #center x and y
+            step_y -= (self.ymax - self.ymin)/2
+            step_y /= (self.ymax - self.ymin)/2
+
+            step_x -= (self.xmax - self.xmin)/2
+            step_x /= (self.xmax - self.xmin)/2
+            
+            step_E = np.sqrt(step_E)
+
+            self.feats = np.stack((step_x, step_y, step_E), axis = 2)
+
+
         # apply random rotation/flips consistently for both datasets
-        for idx in range(self.sharp_branch.shape[0]):
-            flipx, flipy, rot = get_flips()
-            def do_flips(branch,idx,flipx,flipy,rot):
-                if flipx: branch[idx] = np.fliplr(branch[idx])
-                if flipy: branch[idx] = np.flipud(branch[idx])
-                if rot: branch[idx] = np.rot90(branch[idx], rot, (1,2))
-            do_flips(self.sharp_branch,idx,flipx,flipy,rot)
-            do_flips(self.fuzzy_branch,idx,flipx,flipy,rot)
+        if(applyAugs):
+            for idx in range(self.sharp_branch.shape[0]):
+                flipx, flipy, rot = get_flips()
+                def do_flips(branch,idx,flipx,flipy,rot):
+                    if flipx: branch[idx] = np.fliplr(branch[idx])
+                    if flipy: branch[idx] = np.flipud(branch[idx])
+                    if rot: branch[idx] = np.rot90(branch[idx], rot, (1,2))
+                do_flips(self.sharp_branch,idx,flipx,flipy,rot)
+                do_flips(self.fuzzy_branch,idx,flipx,flipy,rot)
         # fix shapes
         self.sharp_branch = self.sharp_branch.squeeze(1)
         self.fuzzy_branch = self.fuzzy_branch.squeeze(1)
@@ -94,13 +161,15 @@ class RootDataset(udata.Dataset):
 
     def __getitem__(self, idx):
         if self.do_unnormalize:
-            return self.unnormalize(self.sharp_branch[idx],idx=idx).squeeze(), \
-                   self.unnormalize(self.fuzzy_branch[idx],idx=idx).squeeze()
+            imgs = (self.unnormalize(self.sharp_branch[idx],idx=idx).squeeze(),
+                   self.unnormalize(self.fuzzy_branch[idx],idx=idx).squeeze())
         else:
             if self.output and any(transform.startswith("normalize") for transform in self.transform):
-                return self.sharp_branch[idx], self.fuzzy_branch[idx], self.means[idx], self.stdevs[idx]
+                imgs = (self.sharp_branch[idx], self.fuzzy_branch[idx], self.means[idx], self.stdevs[idx])
             else:
-                return self.sharp_branch[idx], self.fuzzy_branch[idx]
+                imgs = (self.sharp_branch[idx], self.fuzzy_branch[idx])
+        if(self.imageOnly): return imgs
+        else: return imgs, self.feats[idx]
 
     # assumes array is same size as inputs
     def unnormalize(self,array,idx=None,means=None,stdevs=None):

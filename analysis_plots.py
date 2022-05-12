@@ -196,6 +196,7 @@ def main():
     parser = ArgumentParser(description="DnCNN", config_options=MagiConfigOptions(), formatter_class=ArgumentDefaultsRawHelpFormatter)
 
     parser.add_argument("--outf", type=str, required=True, help='Name of folder to be used to store output folder')
+    parser.add_argument("--applyAugs", default = True, help = "Apply augmentations (flips and rotations) to images")
     parser.add_argument("--folder", type=str, default="analysis-plots", help='Name of folder to be used to store output plots')
     parser.add_argument("--sample", type=str, default="sample-images", help='Name of folder to be used to store sample image plots')
     parser.add_argument("--numpy", type=str, default="test.npz", help='Path to .npz file of CNN-enhanced low quality (fuzzy) data')
@@ -219,7 +220,7 @@ def main():
 
     outputs = np.load(args.numpy)['arr_0']
     random.seed(args.randomseed)
-    sharp, fuzzy = freeze_dataset(dat.RootDataset(args.fileFuzz, args.fileSharp))
+    sharp, fuzzy = freeze_dataset(dat.RootDataset(args.fileFuzz, args.fileSharp, applyAugs = args.applyAugs))
     dataset = dict(
         sharp = dict(data=sharp),
         fuzzy = dict(data=fuzzy),
