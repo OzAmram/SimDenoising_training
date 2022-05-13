@@ -8,7 +8,7 @@ from torch.autograd import Variable
 
 
 class DnPointCloudCNN(nn.Module):
-    def __init__(self, channels=1, img_size = 100, num_init_CNN_layers=3, num_post_CNN_layers = 3, kernel_size=3, features=100, set_feature_size = 3, set_latent_size = 50):
+    def __init__(self, channels=1, img_size = 50, num_init_CNN_layers=3, num_post_CNN_layers = 3, kernel_size=3, features=100, set_feature_size = 3, set_latent_size = 50):
         super(DnPointCloudCNN, self).__init__()
         self.set_feature_size = set_feature_size
         self.set_latent_size = set_latent_size

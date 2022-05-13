@@ -31,17 +31,20 @@ def get_feature_branches(file_paths, num_to_keep = 100):
     step_y = None
     step_z = None
     step_E = None
+    step_t = None
     for i, elem in enumerate(file_paths):
         tree = get_tree(file_paths[i])
         x = tree["step_x"].array()
         y = tree["step_y"].array()
         z = tree["step_z"].array()
         E = tree["step_E"].array()
+        t = tree["step_t"].array()
 
         Es = np.zeros((len(E), num_to_keep))
         xs = np.zeros((len(E), num_to_keep))
         ys = np.zeros((len(E), num_to_keep))
         zs = np.zeros((len(E), num_to_keep))
+        ts = np.zeros((len(E), num_to_keep))
 
         #arrays are not uniform size, so need to loop through
         for j in range(len(E)):
@@ -54,28 +57,33 @@ def get_feature_branches(file_paths, num_to_keep = 100):
             xs[j] = np.array(x[j])[top_idxs]
             ys[j] = np.array(y[j])[top_idxs]
             zs[j] = np.array(z[j])[top_idxs]
+            ts[j] = np.array(t[j])[top_idxs]
 
         if(i == 0):
             step_x = xs
             step_y = ys
             step_z = zs
             step_E = Es
+            step_t = ts
         else:
             step_x = np.concatenate((step_x, xs))
             step_y = np.concatenate((step_y, ys))
             step_z = np.concatenate((step_z, zs))
             step_E = np.concatenate((step_E, Es))
+            step_t = np.concatenate((step_t, ts))
     step_x = np.asarray(step_x)
     step_y = np.asarray(step_y)
     step_z = np.asarray(step_z)
     step_E = np.asarray(step_E)
-    return (step_x, step_y, step_z, step_E)
+    step_t = np.asarray(step_t)
+    return (step_x, step_y, step_z, step_E, step_t)
 
 
 class RootDataset(udata.Dataset):
     allowed_transforms = ["none","normalize","normalizeSharp","log10","sqrt"]
     nfeatures = 1
-    def __init__(self, fuzzy_root, sharp_root, transform=[], shuffle=True, output=False, applyAugs = True, imageOnly=True):
+    def __init__(self, fuzzy_root, sharp_root, transform=[], shuffle=True, output=False, applyAugs = True, imageOnly=True,
+            numSetFeats = 4):
         print(fuzzy_root)
         print(sharp_root)
         self.imageOnly = imageOnly
@@ -122,7 +130,7 @@ class RootDataset(udata.Dataset):
 
         self.feats = None
         if(not self.imageOnly):
-            step_x, step_y, step_z, step_E = get_feature_branches(fuzzy_root, num_to_keep = 100)
+            step_x, step_y, step_z, step_E, step_t = get_feature_branches(fuzzy_root, num_to_keep = 100)
             #center x and y
             step_y -= (self.ymax - self.ymin)/2
             step_y /= (self.ymax - self.ymin)/2
@@ -132,7 +140,11 @@ class RootDataset(udata.Dataset):
             
             step_E = np.sqrt(step_E)
 
-            self.feats = np.stack((step_x, step_y, step_E), axis = 2)
+            if(numSetFeats == 4):
+                self.feats = np.stack((step_x, step_y, step_E, step_t), axis = 2)
+            else:
+                self.feats = np.stack((step_x, step_y, step_E), axis = 2)
+
 
 
         # apply random rotation/flips consistently for both datasets

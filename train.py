@@ -30,6 +30,7 @@ parser = ArgumentParser(description="DnCNN", config_options=MagiConfigOptions(),
 parser.add_argument("--num-layers", type=int, default=9, help="Number of total layers in the CNN")
 parser.add_argument("--imageOnly", default = False, action = 'store_true', help = "Use input image only")
 parser.add_argument("--applyAugs", default = True, help = "Apply augmentations (flips and rotations) to images")
+parser.add_argument("--numSetFeats", type = int, default = 4, help = "Number of features per particle")
 parser.add_argument("--outf", type=str, required=True, help='Name of folder to be used to store outputs')
 parser.add_argument("--epochs", type=int, default=50, help="Number of training epochs")
 parser.add_argument("--lr", type=float, default=1e-3, help="Initial learning rate")
@@ -73,9 +74,11 @@ def main():
     # Load dataset
     print('Loading dataset ...\n')
 
-    dataset_train = RootDataset(sharp_root=args.trainfileSharp, fuzzy_root=args.trainfileFuzz, transform=args.transform, applyAugs = args.applyAugs, imageOnly = args.imageOnly)
+    dataset_train = RootDataset(sharp_root=args.trainfileSharp, fuzzy_root=args.trainfileFuzz, transform=args.transform, 
+            applyAugs = args.applyAugs, imageOnly = args.imageOnly, numSetFeats = args.numSetFeats)
     loader_train = DataLoader(dataset=dataset_train, batch_size=args.batchSize, num_workers=args.num_workers, shuffle=True)
-    dataset_val = RootDataset(sharp_root=args.valfileSharp, fuzzy_root=args.valfileFuzz, transform=args.transform, applyAugs = args.applyAugs, imageOnly = args.imageOnly)
+    dataset_val = RootDataset(sharp_root=args.valfileSharp, fuzzy_root=args.valfileFuzz, transform=args.transform, 
+            applyAugs = args.applyAugs, imageOnly = args.imageOnly, numSetFeats = args.numSetFeats)
     loader_val = DataLoader(dataset=dataset_val, batch_size=args.batchSize, num_workers=args.num_workers)
 
     xbins = dataset_train.xbins
@@ -90,8 +93,8 @@ def main():
         model = DnCNN(channels=1, num_of_layers=args.num_layers, kernel_size=args.kernelSize, features=args.features).to(device=args.device)
     else:
         model = DnPointCloudCNN(channels=1, num_init_CNN_layers=args.num_layers//2, num_post_CNN_layers = args.num_layers//2, 
-                kernel_size=args.kernelSize, features=args.features).to(device=args.device)
-        summary(model, [(1,1,100,100), (1,100,3)])
+                kernel_size=args.kernelSize, features=args.features, set_feature_size = args.numSetFeats).to(device=args.device)
+        summary(model, [(1,1,50,50), (1,100, args.numSetFeats)])
 
     if (args.model == None):
         model.apply(init_weights)
@@ -102,8 +105,8 @@ def main():
         model.eval()
 
     # Loss function
-    #criterion = PatchLoss()
-    criterion = nn.L1Loss()
+    criterion = PatchLoss()
+    #criterion = nn.L1Loss()
     criterion.to(device=args.device)
 
     #Optimizer

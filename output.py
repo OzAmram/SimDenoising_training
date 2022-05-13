@@ -28,7 +28,7 @@ def load_model(trained_model, device, args):
             model = DnCNN(channels=1, num_of_layers=9, kernel_size=3, features=100).to(device)
         else:
             model = DnPointCloudCNN(channels=1, num_init_CNN_layers=args.num_layers//2, num_post_CNN_layers = args.num_layers//2, 
-                kernel_size=args.kernelSize, features=args.features).to(device)
+                kernel_size=args.kernelSize, features=args.features, set_feature_size = args.numSetFeats).to(device)
 
         model.load_state_dict(torch.load(trained_model, map_location=device))
         model.eval()
@@ -41,6 +41,7 @@ def main():
     parser.add_argument("--model", type=str, required=True, help='Path to .pth file with saved model')
     parser.add_argument("--imageOnly", default = False, action = 'store_true', help = "Use input image only")
     parser.add_argument("--applyAugs", default = True, help = "Apply augmentations (flips and rotations) to images")
+    parser.add_argument("--numSetFeats", type = int, default = 4, help = "Number of features per particle")
     parser.add_argument("--numpy", type=str, default="test.npz", help='Name of .npz file with CNN-enhanced low quality (fuzzy) data')
     parser.add_argument("--fileSharp", type=str, default=[], nargs='+', help='Path to higher quality .root file for making plots')
     parser.add_argument("--fileFuzz", type=str, default=[], nargs='+', help='Path to lower quality .root file for making plots')
