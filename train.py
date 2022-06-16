@@ -29,6 +29,7 @@ parser = ArgumentParser(description="DnCNN", config_options=MagiConfigOptions(),
 
 parser.add_argument("--num-layers", type=int, default=9, help="Number of total layers in the CNN")
 parser.add_argument("--imageOnly", default = False, action = 'store_true', help = "Use input image only")
+parser.add_argument("--extraImages", default = False, action = 'store_true', help = "Use images of extra features besides energy")
 parser.add_argument("--applyAugs", default = True, help = "Apply augmentations (flips and rotations) to images")
 parser.add_argument("--numSetFeats", type = int, default = 4, help = "Number of features per particle")
 parser.add_argument("--outf", type=str, required=True, help='Name of folder to be used to store outputs')
@@ -39,7 +40,7 @@ parser.add_argument("--trainfileFuzz", type=str, default=[], nargs='+', help='Pa
 parser.add_argument("--valfileSharp", type=str, default=[], nargs='+', help='Path to higher quality .root file for validation')
 parser.add_argument("--valfileFuzz", type=str, default=[], nargs='+', help='Path to lower quality .root file for validation')
 parser.add_argument("--batchSize", type=int, default=100, help="Training batch size")
-parser.add_argument("--model", type=str, default=None, help="Existing model to continue training, if applicable")
+parser.add_argument("--initModel", type=str, default=None, help="Existing model to continue training, if applicable")
 parser.add_argument("--patchSize", type=int, default=20, help="Size of patches to apply in loss function")
 parser.add_argument("--kernelSize", type=int, default=3, help="Size of kernel in CNN")
 parser.add_argument("--features", type=int, default=9, help="Number of features in CNN layers")
@@ -75,10 +76,10 @@ def main():
     print('Loading dataset ...\n')
 
     dataset_train = RootDataset(sharp_root=args.trainfileSharp, fuzzy_root=args.trainfileFuzz, transform=args.transform, 
-            applyAugs = args.applyAugs, imageOnly = args.imageOnly, numSetFeats = args.numSetFeats)
+            applyAugs = args.applyAugs, imageOnly = args.imageOnly, numSetFeats = args.numSetFeats, extraImages = args.extraImages)
     loader_train = DataLoader(dataset=dataset_train, batch_size=args.batchSize, num_workers=args.num_workers, shuffle=True)
     dataset_val = RootDataset(sharp_root=args.valfileSharp, fuzzy_root=args.valfileFuzz, transform=args.transform, 
-            applyAugs = args.applyAugs, imageOnly = args.imageOnly, numSetFeats = args.numSetFeats)
+            applyAugs = args.applyAugs, imageOnly = args.imageOnly, numSetFeats = args.numSetFeats, extraImages = args.extraImages)
     loader_val = DataLoader(dataset=dataset_val, batch_size=args.batchSize, num_workers=args.num_workers)
 
     xbins = dataset_train.xbins
@@ -90,23 +91,23 @@ def main():
 
     # Build model
     if(args.imageOnly):
-        model = DnCNN(channels=1, num_of_layers=args.num_layers, kernel_size=args.kernelSize, features=args.features).to(device=args.device)
+        model = DnCNN(channels=dataset_train.nfeatures, num_of_layers=args.num_layers, kernel_size=args.kernelSize, features=args.features).to(device=args.device)
     else:
-        model = DnPointCloudCNN(channels=1, num_init_CNN_layers=args.num_layers//2, num_post_CNN_layers = args.num_layers//2, 
+        model = DnPointCloudCNN(channels=dataset_train.nfeatures, num_init_CNN_layers=args.num_layers//2, num_post_CNN_layers = args.num_layers//2, 
                 kernel_size=args.kernelSize, features=args.features, set_feature_size = args.numSetFeats).to(device=args.device)
-        summary(model, [(1,1,50,50), (1,100, args.numSetFeats)])
+        #summary(model, [(1,1,50,50), (1,500, args.numSetFeats)])
 
-    if (args.model == None):
+    if (args.initModel == None):
         model.apply(init_weights)
         print("Creating new model ")
     else:
-        print("Loading model from file " + args.model)
-        model.load_state_dict(torch.load(args.model))
+        print("Loading model from file " + args.initModel)
+        model.load_state_dict(torch.load(args.initModel))
         model.eval()
 
     # Loss function
-    criterion = PatchLoss()
-    #criterion = nn.L1Loss()
+    #criterion = PatchLoss()
+    criterion = nn.L1Loss()
     criterion.to(device=args.device)
 
     #Optimizer
@@ -127,13 +128,11 @@ def main():
             optimizer.zero_grad()
             if(args.imageOnly):
                 sharp, fuzzy = data
-                fuzzy = fuzzy.unsqueeze(1)
                 output = model((fuzzy.float().to(args.device)))
             else:
                 (sharp, fuzzy), feats = data
-                fuzzy = fuzzy.unsqueeze(1)
                 output = model((fuzzy.float().to(args.device)), feats.float().to(args.device))
-            batch_loss = criterion(output.squeeze(1).to(args.device), sharp.to(args.device)).to(args.device)
+            batch_loss = criterion(output.to(args.device), sharp.to(args.device)).to(args.device)
             batch_loss.backward()
             optimizer.step()
             model.eval()
@@ -151,11 +150,11 @@ def main():
         for i, data in tqdm(enumerate(loader_val, 0), unit="batch", total=len(loader_val)):
             if(args.imageOnly):
                 val_sharp, val_fuzzy = data
-                val_output = model((val_fuzzy.unsqueeze(1).float().to(args.device)))
+                val_output = model((val_fuzzy.float().to(args.device)))
             else:
                 (val_sharp, val_fuzzy), val_feats = data
-                val_output = model((val_fuzzy.unsqueeze(1).float().to(args.device)), val_feats.float().to(args.device))
-            output_loss = criterion(val_output.squeeze(1).to(args.device), val_sharp.to(args.device)).to(args.device)
+                val_output = model((val_fuzzy.float().to(args.device)), val_feats.float().to(args.device))
+            output_loss = criterion(val_output.to(args.device), val_sharp.to(args.device)).to(args.device)
             val_loss+=output_loss.item()
             del val_sharp
             del val_fuzzy

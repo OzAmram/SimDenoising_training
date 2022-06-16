@@ -17,12 +17,18 @@ class DnPointCloudCNN(nn.Module):
         self.set_feature_extractor = nn.Sequential(
             nn.Linear(set_feature_size, 50),
             nn.ELU(inplace=True),
-            nn.Linear(50, set_latent_size),
+            nn.Linear(set_latent_size, set_latent_size),
+            nn.ELU(inplace=True),
+            nn.Linear(set_latent_size, set_latent_size),
+            nn.ELU(inplace=True),
+            nn.Linear(set_latent_size, set_latent_size),
             nn.ELU(inplace=True),
             nn.Linear(set_latent_size, set_latent_size)
         )
 
         self.set_regressor = nn.Sequential(
+            nn.Linear(set_latent_size, set_latent_size),
+            nn.ELU(inplace=True),
             nn.Linear(set_latent_size, set_latent_size),
             nn.ELU(inplace=True),
             nn.Linear(set_latent_size, set_latent_size),
@@ -51,7 +57,7 @@ class DnPointCloudCNN(nn.Module):
             post_cnn_layers.append(nn.Conv2d(in_channels=features, out_channels=features, kernel_size=kernel_size, padding=padding, bias=False))
             post_cnn_layers.append(nn.ReLU(inplace=True))
 
-        post_cnn_layers.append(nn.Conv2d(in_channels=features, out_channels=channels, kernel_size=kernel_size, padding=padding, bias=False))
+        post_cnn_layers.append(nn.Conv2d(in_channels=features, out_channels=1, kernel_size=kernel_size, padding=padding, bias=False))
         self.post_cnn = nn.Sequential(*post_cnn_layers)
 
 
@@ -80,7 +86,7 @@ class DnCNN(nn.Module):
         for _ in range(num_of_layers-2):
             layers.append(nn.Conv2d(in_channels=features, out_channels=features, kernel_size=kernel_size, padding=padding, bias=False))
             layers.append(nn.ReLU(inplace=True))
-        layers.append(nn.Conv2d(in_channels=features, out_channels=channels, kernel_size=kernel_size, padding=padding, bias=False))
+        layers.append(nn.Conv2d(in_channels=features, out_channels=1, kernel_size=kernel_size, padding=padding, bias=False))
         self.dncnn = nn.Sequential(*layers)
 
     def forward(self, x):

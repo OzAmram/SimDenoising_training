@@ -200,8 +200,8 @@ def main():
     parser.add_argument("--folder", type=str, default="analysis-plots", help='Name of folder to be used to store output plots')
     parser.add_argument("--sample", type=str, default="sample-images", help='Name of folder to be used to store sample image plots')
     parser.add_argument("--numpy", type=str, default="test.npz", help='Path to .npz file of CNN-enhanced low quality (fuzzy) data')
-    parser.add_argument("--fileSharp", type=str, default=[], nargs='+', help='Path to higher quality .root file for making plots')
-    parser.add_argument("--fileFuzz", type=str, default=[], nargs='+', help='Path to lower quality .root file for making plots')
+    parser.add_argument("--fileSharp", "--testfileSharp", dest = 'testfileSharp', type=str, default=[], nargs='+', help='Path to higher quality .root file for making plots')
+    parser.add_argument("--fileFuzz", "--testfileFuzz", dest = 'testfileFuzz', type=str, default=[], nargs='+', help='Path to lower quality .root file for making plots')
     parser.add_argument("--randomseed", type=int, default=0, help="Initial value for random.seed()")
     parser.add_argument("--printformats", type=str, default=["png"], nargs='+', help="print formats")
     parser.add_argument("--verbose", default=False, action="store_true", help="enable verbose printouts")
@@ -216,15 +216,15 @@ def main():
 
     t1 = time.time()
     if args.verbose: print("Started")
-    bininfo = calculate_bins(args.fileSharp[0])
+    bininfo = calculate_bins(args.testfileSharp[0])
 
     outputs = np.load(args.numpy)['arr_0']
     random.seed(args.randomseed)
-    sharp, fuzzy = freeze_dataset(dat.RootDataset(args.fileFuzz, args.fileSharp, applyAugs = args.applyAugs))
+    sharp, fuzzy = freeze_dataset(dat.RootDataset(args.testfileFuzz, args.testfileSharp, applyAugs = args.applyAugs))
     dataset = dict(
-        sharp = dict(data=sharp),
-        fuzzy = dict(data=fuzzy),
-        outputs = dict(data=outputs),
+        sharp = dict(data=sharp.squeeze()),
+        fuzzy = dict(data=fuzzy.squeeze()),
+        outputs = dict(data=outputs.squeeze()),
     )
 
     threshold = 0.1

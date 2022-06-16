@@ -17,11 +17,11 @@ def get_tree(file_path):
     tree = file["g4SimHits/tree"]
     return tree
 
-def get_branch(file_paths):
+def get_branch(file_paths, branch_name = 'bin_weights'):
     branch = []
     for i, elem in enumerate(file_paths):
         tree = get_tree(file_paths[i])
-        events = tree["bin_weights"].array()
+        events = tree[branch_name].array()
         branch = np.concatenate((branch, events))
     branch = np.asarray(branch)
     return branch
@@ -83,7 +83,7 @@ class RootDataset(udata.Dataset):
     allowed_transforms = ["none","normalize","normalizeSharp","log10","sqrt"]
     nfeatures = 1
     def __init__(self, fuzzy_root, sharp_root, transform=[], shuffle=True, output=False, applyAugs = True, imageOnly=True,
-            numSetFeats = 4):
+            numSetFeats = 4, extraImages = False):
         print(fuzzy_root)
         print(sharp_root)
         self.imageOnly = imageOnly
@@ -109,28 +109,45 @@ class RootDataset(udata.Dataset):
 
         # get data in np format
         self.sharp_branch = get_branch(sharp_root)
-        self.fuzzy_branch = get_branch(fuzzy_root)
+        self.fuzzy_branch_E = get_branch(fuzzy_root)
         # reshape to image tensor
-        self.sharp_branch = self.sharp_branch.reshape((self.sharp_branch.shape[0],self.nfeatures,self.xbins,self.ybins))
-        self.fuzzy_branch = self.fuzzy_branch.reshape((self.fuzzy_branch.shape[0],self.nfeatures,self.xbins,self.ybins))
+        self.sharp_branch = self.sharp_branch.reshape((self.sharp_branch.shape[0],1,self.xbins,self.ybins))
+        self.fuzzy_branch_E = self.fuzzy_branch_E.reshape((self.fuzzy_branch_E.shape[0],1,self.xbins,self.ybins))
+        if(extraImages):
+            self.fuzzy_branch_time = get_branch(fuzzy_root, 't_Eavg_bin_weights').reshape(self.fuzzy_branch_E.shape[0], 1, self.xbins, self.ybins)
+            #self.fuzzy_branch_time = get_branch(fuzzy_root, 't_avg_bin_weights').reshape(self.fuzzy_branch_E.shape[0], 1, self.xbins, self.ybins)
+            #self.fuzzy_branch_time = get_branch(fuzzy_root, 't_max_bin_weights').reshape(self.fuzzy_branch_E.shape[0], 1, self.xbins, self.ybins)
+            self.fuzzy_branch_n = get_branch(fuzzy_root, 'n_bin_weights').reshape(self.fuzzy_branch_E.shape[0], 1, self.xbins, self.ybins)
+            self.nfeatures = 3
         # apply transforms if any (in order)
         for transform in self.transform:
             if transform=="log10":
                 self.sharp_branch = np.log10(self.sharp_branch+1.0)
-                self.fuzzy_branch = np.log10(self.fuzzy_branch+1.0)
+                self.fuzzy_branch_E = np.log10(self.fuzzy_branch_E+1.0)
             elif transform=="sqrt":
                 self.sharp_branch = np.sqrt(self.sharp_branch)
-                self.fuzzy_branch = np.sqrt(self.fuzzy_branch)
+                self.fuzzy_branch_E = np.sqrt(self.fuzzy_branch_E)
             elif transform.startswith("normalize"):
-                norm_branch = self.sharp_branch if transform=="normalizeSharp" else self.fuzzy_branch
+                norm_branch = self.sharp_branch if transform=="normalizeSharp" else self.fuzzy_branch_E
                 self.means = np.average(norm_branch, axis=(1,2,3))[:,None,None,None]
                 self.stdevs = np.std(norm_branch, axis=(1,2,3))[:,None,None,None]
+                print('means', self.means.shape)
                 self.sharp_branch = np.divide(self.sharp_branch-self.means,self.stdevs,where=self.stdevs!=0)
-                self.fuzzy_branch = np.divide(self.fuzzy_branch-self.means,self.stdevs,where=self.stdevs!=0)
+                self.fuzzy_branch_E = np.divide(self.fuzzy_branch_E-self.means,self.stdevs,where=self.stdevs!=0)
+                if(extraImages):
+
+                    self.means_time = np.average(self.fuzzy_branch_time, axis=(1,2,3))[:,None,None,None]
+                    self.stdevs_time = np.std(self.fuzzy_branch_time, axis=(1,2,3))[:,None,None,None]
+                    self.means_n = np.average(self.fuzzy_branch_n, axis=(1,2,3))[:,None,None,None]
+                    self.stdevs_n = np.std(self.fuzzy_branch_n, axis=(1,2,3))[:,None,None,None]
+                    self.fuzzy_branch_time = np.divide(self.fuzzy_branch_time-self.means_time,self.stdevs_time,where=self.stdevs_time!=0)
+                    self.fuzzy_branch_n = np.divide(self.fuzzy_branch_n-self.means_n,self.stdevs_n,where=self.stdevs_n!=0)
+
 
         self.feats = None
         if(not self.imageOnly):
-            step_x, step_y, step_z, step_E, step_t = get_feature_branches(fuzzy_root, num_to_keep = 100)
+            num_to_keep = 500 
+            step_x, step_y, step_z, step_E, step_t = get_feature_branches(fuzzy_root, num_to_keep = num_to_keep)
             #center x and y
             step_y -= (self.ymax - self.ymin)/2
             step_y /= (self.ymax - self.ymin)/2
@@ -146,6 +163,12 @@ class RootDataset(udata.Dataset):
                 self.feats = np.stack((step_x, step_y, step_E), axis = 2)
 
 
+        if(extraImages):
+            self.fuzzy_branch = np.concatenate((self.fuzzy_branch_E, self.fuzzy_branch_time, self.fuzzy_branch_n), axis =1)
+        else:
+            self.fuzzy_branch  = self.fuzzy_branch_E
+
+
 
         # apply random rotation/flips consistently for both datasets
         if(applyAugs):
@@ -158,8 +181,9 @@ class RootDataset(udata.Dataset):
                 do_flips(self.sharp_branch,idx,flipx,flipy,rot)
                 do_flips(self.fuzzy_branch,idx,flipx,flipy,rot)
         # fix shapes
-        self.sharp_branch = self.sharp_branch.squeeze(1)
-        self.fuzzy_branch = self.fuzzy_branch.squeeze(1)
+        #print(self.fuzzy_branch.shape)
+        #self.sharp_branch = self.sharp_branch.squeeze(1)
+        #self.fuzzy_branch = self.fuzzy_branch.squeeze(1)
         if self.means is not None:
             self.means = np.squeeze(self.means,1)
         if self.stdevs is not None:
