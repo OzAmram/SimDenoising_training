@@ -6,14 +6,15 @@ import glob
 
 energy = 850
 num_events = '*'
-num_files = 88
-#num_files = 4
+#num_files = 24
+num_files = 28
 val_frac = 0.25
 #currently only works with multiple files ... ?
 
 def get_files(filetype):
     globstr = ""
-    globstr = '/storage/local/data1/gpuscratch/oamram/denoise/May13Prod/ntup_photon_energy'+str(energy)+'*Prod*_n'+str(num_events)+'_part*.root'
+    globstr = '/storage/local/data1/gpuscratch/oamram/denoise/June15Prod/ntup_photon_energy'+str(energy)+'*Prod*_n'+str(num_events)+'_part*.root'
+    #globstr = '/storage/local/data1/gpuscratch/oamram/denoise/May13Prod/ntup_photon_energy'+str(energy)+'*Prod*_n'+str(num_events)+'_part*.root'
     #if filetype == 'Fuzz': globstr = '/storage/local/data1/gpuscratch/oamram/denoise/May13Prod/ntup_photon_energy'+str(energy)+'*Prod*_n'+str(num_events)+'_part*.root'
     #elif filetype == 'Sharp': globstr = '/storage/local/data1/gpuscratch/oamram/denoise/May13Prod/ntup_photon_energy'+str(energy)+'*phi0.0_n'+str(num_events)+'_part*.root'
     #if filetype == 'Fuzz': globstr = 'root://cmseosmgm01.fnal.gov:1094//store/user/oamram/SimDenoise/ntup_photon_energy'+str(energy)+'*Prod*_n'+str(num_events)+'_part*.root'
@@ -29,17 +30,15 @@ def get_files(filetype):
     print("%i files for training, %i for val" % (num_train_files, tot_num_files - num_train_files))
     list_of_names_t = list_of_names[:num_train_files]
     list_of_names_v = list_of_names[num_train_files:tot_num_files]
-    print(len(list_of_names_t), len(list_of_names_v))
     return list_of_names_t, list_of_names_v
 
 fuzzy_t_files, fuzzy_v_files = get_files('Fuzz')
 sharp_t_files, sharp_v_files = get_files('Sharp')
 
-print(fuzzy_t_files)
-print(fuzzy_v_files)
 
 config = MagiConfig()
-config.outf = 'out-train-june15-SetFeats500-largeTrain'
+config.outf = 'out-train-july18-4Feats-Norm'
+#config.outf = 'out-train-july7-FeatsTest'
 config.imageOnly = False
 config.extraImages = False
 config.applyAugs = False

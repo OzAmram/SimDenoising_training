@@ -26,57 +26,43 @@ def get_branch(file_paths, branch_name = 'bin_weights'):
     branch = np.asarray(branch)
     return branch
 
-def get_feature_branches(file_paths, num_to_keep = 100):
-    step_x = None
-    step_y = None
-    step_z = None
-    step_E = None
-    step_t = None
+def get_feature_branches(file_paths, keys = None, num_to_keep = 100):
+    if(keys is None): keys = ["step_E", "step_x", "step_y", "step_t"]
+    keys.remove("step_E")
+    E_output = None
+    f_output = None
+
     for i, elem in enumerate(file_paths):
         tree = get_tree(file_paths[i])
-        x = tree["step_x"].array()
-        y = tree["step_y"].array()
-        z = tree["step_z"].array()
         E = tree["step_E"].array()
-        t = tree["step_t"].array()
+        arrs = [tree[key].array() for key in keys]
 
-        Es = np.zeros((len(E), num_to_keep))
-        xs = np.zeros((len(E), num_to_keep))
-        ys = np.zeros((len(E), num_to_keep))
-        zs = np.zeros((len(E), num_to_keep))
-        ts = np.zeros((len(E), num_to_keep))
+        E_outs = np.zeros((len(E), num_to_keep))
+        outs = np.zeros((len(keys), len(E), num_to_keep))
 
         #arrays are not uniform size, so need to loop through
         for j in range(len(E)):
             #normalize E (?)
 
             #Get indices of largest energy steps
-            E_ = np.array(E[j])
-            top_idxs = np.argpartition(E_, kth = -num_to_keep)[-num_to_keep:]
-            Es[j] = E_[top_idxs]
-            xs[j] = np.array(x[j])[top_idxs]
-            ys[j] = np.array(y[j])[top_idxs]
-            zs[j] = np.array(z[j])[top_idxs]
-            ts[j] = np.array(t[j])[top_idxs]
+            np_E = np.array(E[j])
+            np_arr = np.array([ a[j] for a in arrs])
+            top_idxs = np.argpartition(np_E, kth = -num_to_keep)[-num_to_keep:]
+
+            E_outs[j] = np_E[top_idxs]
+            outs[:,j,:] = np_arr[:, top_idxs]
 
         if(i == 0):
-            step_x = xs
-            step_y = ys
-            step_z = zs
-            step_E = Es
-            step_t = ts
+            E_output = E_outs
+            f_output = outs
+            
         else:
-            step_x = np.concatenate((step_x, xs))
-            step_y = np.concatenate((step_y, ys))
-            step_z = np.concatenate((step_z, zs))
-            step_E = np.concatenate((step_E, Es))
-            step_t = np.concatenate((step_t, ts))
-    step_x = np.asarray(step_x)
-    step_y = np.asarray(step_y)
-    step_z = np.asarray(step_z)
-    step_E = np.asarray(step_E)
-    step_t = np.asarray(step_t)
-    return (step_x, step_y, step_z, step_E, step_t)
+            E_output = np.concatenate((E_output, E_outs), axis = 0)
+            f_output = np.concatenate((f_output, outs), axis = 1)
+
+    #Group features per event together by reorganizing array
+    f_output = f_output.swapaxes(0,2).swapaxes(0,1)
+    return (E_output, f_output)
 
 
 class RootDataset(udata.Dataset):
@@ -131,7 +117,6 @@ class RootDataset(udata.Dataset):
                 norm_branch = self.sharp_branch if transform=="normalizeSharp" else self.fuzzy_branch_E
                 self.means = np.average(norm_branch, axis=(1,2,3))[:,None,None,None]
                 self.stdevs = np.std(norm_branch, axis=(1,2,3))[:,None,None,None]
-                print('means', self.means.shape)
                 self.sharp_branch = np.divide(self.sharp_branch-self.means,self.stdevs,where=self.stdevs!=0)
                 self.fuzzy_branch_E = np.divide(self.fuzzy_branch_E-self.means,self.stdevs,where=self.stdevs!=0)
                 if(extraImages):
@@ -146,21 +131,34 @@ class RootDataset(udata.Dataset):
 
         self.feats = None
         if(not self.imageOnly):
-            num_to_keep = 500 
-            step_x, step_y, step_z, step_E, step_t = get_feature_branches(fuzzy_root, num_to_keep = num_to_keep)
+            num_to_keep = 100
+            keys_tot = ["step_E", "step_x", "step_y", "step_t", "step_z", "step_length", "delta_px", "delta_py", "delta_pz", "delta_t"]
+            keys = keys_tot[:numSetFeats]
+            step_E, other = get_feature_branches(fuzzy_root, num_to_keep = num_to_keep, keys = keys)
+            print("step_E", step_E.shape)
+            print("other", other.shape)
             #center x and y
-            step_y -= (self.ymax - self.ymin)/2
-            step_y /= (self.ymax - self.ymin)/2
+            #step_y -= (self.ymax - self.ymin)/2
+            #step_y /= (self.ymax - self.ymin)/2
 
-            step_x -= (self.xmax - self.xmin)/2
-            step_x /= (self.xmax - self.xmin)/2
+            #step_x -= (self.xmax - self.xmin)/2
+            #step_x /= (self.xmax - self.xmin)/2
             
             step_E = np.sqrt(step_E)
 
-            if(numSetFeats == 4):
-                self.feats = np.stack((step_x, step_y, step_E, step_t), axis = 2)
-            else:
-                self.feats = np.stack((step_x, step_y, step_E), axis = 2)
+            #if(numSetFeats == 4):
+            #    self.feats = np.stack((step_x, step_y, step_E, step_t), axis = 2)
+            #else:
+            #    self.feats = np.stack((step_x, step_y, step_E), axis = 2)
+            step_E = np.expand_dims(step_E, axis = -1)
+            print(other.shape)
+            print(step_E.shape)
+            self.feats = np.concatenate((other, step_E), axis = 2)
+            print(self.feats.shape)
+            means = np.average(self.feats, axis = 0)
+            stds = np.std(self.feats, axis = 0)
+            print(self.feats.shape, means.shape, stds.shape)
+            self.feats = (self.feats - means)/ stds
 
 
         if(extraImages):
